@@ -10621,6 +10621,9 @@ Choisis obligatoirement l'un des deux, même en cas de doute (le plus probable d
                 ws.send(JSON.stringify({ realtimeInput: { audio: { data: b64, mimeType: `audio/pcm;rate=${currentMicSampleRate}` } } }));
             } else if (activeModelId === 'gpt-realtime-translate') {
                 ws.send(JSON.stringify({ type: 'session.input_audio_buffer.append', audio: b64 }));
+            } else if (isTranscripteurMode || (isTraducteurMode && activeProvider === 'byteplus') ||
+                       (isTraducteurMode && getTranslateSourceLang() !== 'auto' && getTranslateSourceLang() === getTranslateLang('openai'))) {
+                ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64 }));
             } else {
                 ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64 }));
             }
@@ -11882,9 +11885,9 @@ Quand tu délègues, préviens brièvement l'utilisateur et n'invente jamais le 
                             input: {
                                 format: { type: 'audio/pcm', rate: 24000 },
                                 // Langue fixée (ISO 639-1) ou détection automatique (paramètre omis)
-                                transcription: ((isTraducteurMode && activeProvider === 'byteplus') ? getTranslateSourceLang() : getTranscribeLang('openai')) === 'auto'
+                                transcription: ((isTraducteurMode && (activeProvider === 'byteplus' || getTranslateSourceLang() !== 'auto')) ? getTranslateSourceLang() : getTranscribeLang('openai')) === 'auto'
                                     ? { model: 'gpt-realtime-whisper' }
-                                    : { model: 'gpt-realtime-whisper', language: (isTraducteurMode && activeProvider === 'byteplus') ? getTranslateSourceLang() : getTranscribeLang('openai') }
+                                    : { model: 'gpt-realtime-whisper', language: (isTraducteurMode && (activeProvider === 'byteplus' || getTranslateSourceLang() !== 'auto')) ? getTranslateSourceLang() : getTranscribeLang('openai') }
                             }
                         }
                     }
