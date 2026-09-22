@@ -6198,11 +6198,16 @@ Tu peux utiliser des expressions familières et des interjections naturelles ("a
     // l'endpoint /realtime/translations ; Gemini le modèle Live Translate.
     const TRANSLATE_MODELS = [
         { key: 'openai', name: 'OpenAI', model: 'gpt-realtime-translate',            provider: 'openai' },
-        { key: 'gemini', name: 'Gemini', model: 'gemini-3.5-live-translate-preview', provider: 'gemini' }
+        { key: 'gemini', name: 'Gemini', model: 'gemini-3.5-live-translate-preview', provider: 'gemini' },
+        { key: 'byteplus', name: 'BytePlus', model: 'seed-translation-250915',       provider: 'byteplus' }
     ];
+    function getBytePlusBridgeUrl() {
+        return localStorage.getItem('kast_byteplusBridgeUrl') || 'https://byteplus-server.vercel.app/api/byteplus/translate';
+    }
     // La clé API du fournisseur d'un moteur (Traducteur / Transcripteur) est-elle renseignée ?
     function engineHasKey(m) {
-        return m.provider === 'gemini' ? !!getGeminiApiKey()
+        return m.provider === 'byteplus' ? !!getBytePlusBridgeUrl()
+             : m.provider === 'gemini' ? !!getGeminiApiKey()
              : m.provider === 'xai'    ? !!getXaiApiKey()
              : !!getApiKey();
     }
@@ -10703,6 +10708,7 @@ Tu ouvres la conversation. Personne n'a encore parlé et tu n'as reçu aucune de
         }
         if (isTraducteurMode) {
             if (activeProvider === 'gemini') connectGeminiTranslate();
+            else if (activeProvider === 'byteplus') connectBytePlus();
             else connectTranslate(null);
             return;
         }
@@ -10721,6 +10727,33 @@ Tu ouvres la conversation. Personne n'a encore parlé et tu n'as reçu aucune de
         } else {
             connectOpenAI(persona);
         }
+    }
+
+    // BytePlus utilise le micro pour la transcription OpenAI, puis traduit
+    // chaque segment final via le bridge serveur. La clé BytePlus ne quitte
+    // jamais le backend, contrairement aux fournisseurs connectés directement.
+    async function translateWithBytePlus(text) {
+        const sourceLanguage = getTranslateSourceLang();
+        const response = await fetch(getBytePlusBridgeUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text,
+                sourceLanguage,
+                targetLanguage: getTranslateLang('byteplus')
+            })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || `BytePlus HTTP ${response.status}`);
+        return result.text || '';
+    }
+
+    function connectBytePlus() {
+        if (!getApiKey()) {
+            handleConnectionFailure('BytePlus utilise la clé OpenAI uniquement pour transcrire le micro.');
+            return;
+        }
+        connectWhisper();
     }
 
     function connectOpenAI(persona) {
@@ -11919,7 +11952,22 @@ Quand tu délègues, préviens brièvement l'utilisateur et n'invente jamais le 
 
             // Transcription finale d'un segment
             case 'conversation.item.input_audio_transcription.completed':
-                finalizeTranscriptSegment(data.transcript || '');
+                if (isTraducteurMode && activeProvider === 'byteplus') {
+                    const sourceText = data.transcript || '';
+                    if (sourceText.trim()) {
+                        addTranscriptMessage('Source', sourceText, 'user');
+                        setStatus('Traduction BytePlus...', 'connected');
+                        translateWithBytePlus(sourceText).then(translated => {
+                            if (translated.trim()) addTranscriptMessage('Traduction', translated, 'ai');
+                            setStatus(`Traduction en ${translateLangInfo(getTranslateLang('byteplus')).name.toLowerCase()}, parlez !`, 'connected');
+                        }).catch(err => {
+                            console.error('[BytePlus] Erreur:', err);
+                            setStatus(`Erreur BytePlus : ${err.message}`, 'error');
+                        });
+                    }
+                } else {
+                    finalizeTranscriptSegment(data.transcript || '');
+                }
                 break;
 
             case 'input_audio_buffer.speech_started':
