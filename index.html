@@ -11353,14 +11353,7 @@ Quand tu délègues, préviens brièvement l'utilisateur et n'invente jamais le 
             ws.send(JSON.stringify({
                 type: 'session.update',
                 session: {
-                    audio: {
-                        input: getTranslateSourceLang() !== 'auto'
-                            ? { transcription: { language: getTranslateSourceLang() } }
-                            : {},
-                        output: {
-                            language: lang
-                        }
-                    }
+                    audio: { output: { language: lang } }
                 }
             }));
             micReady = true;
