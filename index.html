@@ -10584,21 +10584,47 @@ Choisis obligatoirement l'un des deux, même en cas de doute (le plus probable d
     let persistentStream = null;
 
     let currentMicSampleRate = 24000;
+    let micAudioBlocksSent = 0;
+    function resampleMicToPcm16Base64(input, inputRate, outputRate) {
+        if (inputRate === outputRate) return float32ToPcm16Base64(input);
+        const outputLength = Math.max(1, Math.round(input.length * outputRate / inputRate));
+        const ratio = inputRate / outputRate;
+        const pcm = new Int16Array(outputLength);
+        for (let i = 0; i < outputLength; i++) {
+            const pos = i * ratio;
+            const left = Math.floor(pos);
+            const right = Math.min(left + 1, input.length - 1);
+            const frac = pos - left;
+            const sample = input[left] * (1 - frac) + input[right] * frac;
+            pcm[i] = Math.max(-1, Math.min(1, sample)) * (sample < 0 ? 32768 : 32767);
+        }
+        const bytes = new Uint8Array(pcm.buffer);
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
+        }
+        return btoa(binary);
+    }
 
     async function startMicrophone(sampleRate) {
-        sampleRate = sampleRate || 24000;
-        currentMicSampleRate = sampleRate;
+        const targetRate = sampleRate || 24000;
+        currentMicSampleRate = targetRate;
         // Note : on NE recrée PAS le stream si le sample rate demandé diffère,
         // afin de ne pas redemander la permission micro au navigateur.
         // L'AudioContext ci-dessous est créé au taux voulu et resample
         // implicitement le stream — c'est une différence acceptable.
         if (!persistentStream || !persistentStream.active) {
             persistentStream = await navigator.mediaDevices.getUserMedia({
-                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: sampleRate, channelCount: 1 }
+                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
             });
         }
         mediaStream = persistentStream;
-        audioContext = new AudioContext({ sampleRate: sampleRate });
+        // Laisser le navigateur choisir sa fréquence matérielle évite les
+        // streams muets ou suspendus sur certains téléphones Android.
+        audioContext = new AudioContext();
+        if (audioContext.state === 'suspended') await audioContext.resume();
+        const sourceRate = audioContext.sampleRate;
         sourceNode = audioContext.createMediaStreamSource(mediaStream);
         // Analyseur fréquentiel pour la ligne d'onde
         userMicAnalyser = audioContext.createAnalyser();
@@ -10616,11 +10642,16 @@ Choisis obligatoirement l'un des deux, même en cas de doute (le plus probable d
             }
             userAudioLevel = Math.min(1, computeLevel(input) * 8);
             if (!ws || ws.readyState !== WebSocket.OPEN) return;
-            const b64 = float32ToPcm16Base64(input);
+            const targetAudioRate = activeProvider === 'gemini' ? 16000 : 24000;
+            const b64 = resampleMicToPcm16Base64(input, sourceRate, targetAudioRate);
+            micAudioBlocksSent++;
             if (activeProvider === 'gemini') {
-                ws.send(JSON.stringify({ realtimeInput: { audio: { data: b64, mimeType: `audio/pcm;rate=${currentMicSampleRate}` } } }));
+                ws.send(JSON.stringify({ realtimeInput: { audio: { data: b64, mimeType: `audio/pcm;rate=${targetAudioRate}` } } }));
             } else if (activeModelId === 'gpt-realtime-translate') {
-                ws.send(JSON.stringify({ type: 'session.input_audio_buffer.append', audio: b64 }));
+                // L'endpoint /v1/realtime/translations utilise le même
+                // événement audio buffer que Realtime : le préfixe `session.`
+                // n'est pas valide ici et provoque l'arrêt après le premier envoi.
+                ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64 }));
             } else if (isTranscripteurMode || (isTraducteurMode && activeProvider === 'byteplus') ||
                        (isTraducteurMode && getTranslateSourceLang() !== 'auto' && getTranslateSourceLang() === getTranslateLang('openai'))) {
                 ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64 }));
@@ -10712,7 +10743,6 @@ Tu ouvres la conversation. Personne n'a encore parlé et tu n'as reçu aucune de
         if (isTraducteurMode) {
             if (activeProvider === 'gemini') connectGeminiTranslate();
             else if (activeProvider === 'byteplus') connectBytePlus();
-            else if (getTranslateSourceLang() !== 'auto' && getTranslateSourceLang() === getTranslateLang('openai')) connectWhisper();
             else connectTranslate(null);
             return;
         }
@@ -14192,7 +14222,8 @@ Quand tu délègues, préviens brièvement l'utilisateur et n'invente jamais le 
 
         try {
             if (!isTranscripteurMode) {
-                playbackContext = new AudioContext({ sampleRate: 24000 });
+                playbackContext = new AudioContext();
+                if (playbackContext.state === 'suspended') await playbackContext.resume();
                 playbackAnalyser = playbackContext.createAnalyser();
                 playbackAnalyser.fftSize = 256;
                 playbackAnalyser.smoothingTimeConstant = 0.3;
