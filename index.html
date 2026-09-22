@@ -6465,6 +6465,33 @@ Tu peux utiliser des expressions familières et des interjections naturelles ("a
         engine = engine || getTranslateModel();
         localStorage.setItem('kast_translateLang_' + engine, code);
     }
+    // Langue parlée par la source du mode Traducteur. « auto » conserve la
+    // détection automatique ; une langue imposée améliore les longs audios
+    // (livres audio, conférences) où la détection peut dériver.
+    const TRANSLATE_SOURCE_LANGS = [
+        { code: 'auto', name: 'Détection automatique' },
+        { code: 'zh', name: 'Mandarin / chinois' },
+        { code: 'en', name: 'Anglais' },
+        { code: 'fr', name: 'Français' },
+        { code: 'es', name: 'Espagnol' },
+        { code: 'de', name: 'Allemand' },
+        { code: 'it', name: 'Italien' },
+        { code: 'ja', name: 'Japonais' },
+        { code: 'ko', name: 'Coréen' },
+        { code: 'pt', name: 'Portugais' },
+        { code: 'ru', name: 'Russe' },
+        { code: 'ar', name: 'Arabe' }
+    ];
+    function getTranslateSourceLang() {
+        const stored = localStorage.getItem('kast_translateSourceLang') || 'auto';
+        return TRANSLATE_SOURCE_LANGS.some(l => l.code === stored) ? stored : 'auto';
+    }
+    function setTranslateSourceLang(code) {
+        localStorage.setItem('kast_translateSourceLang', code);
+    }
+    function translateSourceLangInfo(code) {
+        return TRANSLATE_SOURCE_LANGS.find(l => l.code === code) || TRANSLATE_SOURCE_LANGS[0];
+    }
     function translateLangInfo(code, engine) {
         const list = translateLangsFor(engine);
         return list.find(l => l.code === code) || list[0];
@@ -9927,6 +9954,14 @@ Choisis obligatoirement l'un des deux, même en cas de doute (le plus probable d
         btn.innerHTML = `<span class="tl-engine">${engine.name}</span><span class="tl-target">Vers ${info.name.toLowerCase()}</span>${flag ? `<span class="flag" aria-hidden="true">${flag}</span>` : ''}<span class="chev">${ICON_SVG['chevron-down']}</span>`;
         btn.addEventListener('click', (e) => { e.stopPropagation(); openTraducteurSelect(btn); });
         container.appendChild(btn);
+        const sourceBtn = document.createElement('button');
+        sourceBtn.type = 'button';
+        sourceBtn.className = 'traducteur-lang-btn traducteur-select-btn';
+        sourceBtn.setAttribute('aria-haspopup', 'listbox');
+        const source = translateSourceLangInfo(getTranslateSourceLang());
+        sourceBtn.innerHTML = `<span class="tl-target">Source : ${source.name}</span><span class="chev">${ICON_SVG['chevron-down']}</span>`;
+        sourceBtn.addEventListener('click', (e) => { e.stopPropagation(); openTraducteurSourceSelect(sourceBtn); });
+        container.appendChild(sourceBtn);
     }
 
     // Même pilule pour le Transcripteur : moteur (OpenAI / Gemini) + langue
@@ -10089,6 +10124,21 @@ Choisis obligatoirement l'un des deux, même en cas de doute (le plus probable d
                 // Rafraîchit le badge modèle (le moteur a pu changer).
                 if (isTraducteurMode && !isConnected) updateTokenCounter();
                 if (isConnected) setStatus('Réglage changé, arrêtez puis relancez pour appliquer', 'error');
+            }
+        });
+    }
+
+    function openTraducteurSourceSelect(anchor) {
+        openEngineLangPanel(anchor, {
+            engines: [{ key: 'source', name: 'Langue parlée', model: translateModelInfo(getTranslateModel()).model, provider: translateModelInfo(getTranslateModel()).provider }],
+            currentEngine: 'source',
+            langsFor: () => TRANSLATE_SOURCE_LANGS,
+            currentLang: () => getTranslateSourceLang(),
+            flagFor: (code) => code === 'auto' ? '🔎' : langFlag(code),
+            onPick: (_engine, code) => {
+                setTranslateSourceLang(code);
+                refreshTraducteurControls();
+                if (isTraducteurMode && isConnected) setStatus('Réglage changé, arrêtez puis relancez pour appliquer', 'error');
             }
         });
     }
@@ -11237,6 +11287,9 @@ Quand tu délègues, préviens brièvement l'utilisateur et n'invente jamais le 
                 type: 'session.update',
                 session: {
                     audio: {
+                        input: getTranslateSourceLang() !== 'auto'
+                            ? { transcription: { language: getTranslateSourceLang() } }
+                            : {},
                         output: {
                             language: lang
                         }
@@ -11339,7 +11392,9 @@ Quand tu délègues, préviens brièvement l'utilisateur et n'invente jamais le 
                             echoTargetLanguage: false
                         }
                     },
-                    inputAudioTranscription: {},
+                    inputAudioTranscription: getTranslateSourceLang() === 'auto'
+                        ? {}
+                        : { languageCode: getTranslateSourceLang() },
                     outputAudioTranscription: {}
                 }
             };
