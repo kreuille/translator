@@ -10709,6 +10709,7 @@ Tu ouvres la conversation. Personne n'a encore parlé et tu n'as reçu aucune de
         if (isTraducteurMode) {
             if (activeProvider === 'gemini') connectGeminiTranslate();
             else if (activeProvider === 'byteplus') connectBytePlus();
+            else if (getTranslateSourceLang() !== 'auto' && getTranslateSourceLang() === getTranslateLang('openai')) connectWhisper();
             else connectTranslate(null);
             return;
         }
