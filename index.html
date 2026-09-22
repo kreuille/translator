@@ -11881,9 +11881,9 @@ Quand tu délègues, préviens brièvement l'utilisateur et n'invente jamais le 
                             input: {
                                 format: { type: 'audio/pcm', rate: 24000 },
                                 // Langue fixée (ISO 639-1) ou détection automatique (paramètre omis)
-                                transcription: getTranscribeLang('openai') === 'auto'
+                                transcription: ((isTraducteurMode && activeProvider === 'byteplus') ? getTranslateSourceLang() : getTranscribeLang('openai')) === 'auto'
                                     ? { model: 'gpt-realtime-whisper' }
-                                    : { model: 'gpt-realtime-whisper', language: getTranscribeLang('openai') }
+                                    : { model: 'gpt-realtime-whisper', language: (isTraducteurMode && activeProvider === 'byteplus') ? getTranslateSourceLang() : getTranscribeLang('openai') }
                             }
                         }
                     }
